@@ -1,9 +1,14 @@
+from datetime import datetime, timezone
 from fastapi import FastAPI, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.database import engine, get_db, Base
 from app import models
-from app.schemas import UserCreate, UserResponse, LoginRequest, Token
+from app.schemas import (
+    UserCreate, UserResponse, LoginRequest, Token,
+    ThreadCreate, ThreadResponse,
+    MessageCreate, MessageResponse,
+)
 from app.auth import hash_password, verify_password, create_access_token, get_current_user
 
 # Create tables on startup — for production use Alembic migrations instead
@@ -11,6 +16,10 @@ Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="dboss-backend")
 
+
+# ---------------------------------------------------------------------------
+# Auth
+# ---------------------------------------------------------------------------
 
 @app.post("/register", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
 def register(payload: UserCreate, db: Session = Depends(get_db)):
@@ -45,3 +54,102 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 @app.get("/me", response_model=UserResponse)
 def me(current_user: models.User = Depends(get_current_user)):
     return current_user
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _get_thread_or_404(thread_id: int, current_user: models.User, db: Session) -> models.Thread:
+    thread = (
+        db.query(models.Thread)
+        .filter(models.Thread.id == thread_id, models.Thread.user_id == current_user.id)
+        .first()
+    )
+    if not thread:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    return thread
+
+
+# ---------------------------------------------------------------------------
+# Threads
+# ---------------------------------------------------------------------------
+
+@app.post("/threads", response_model=ThreadResponse, status_code=status.HTTP_201_CREATED)
+def create_thread(
+    payload: ThreadCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    thread = models.Thread(user_id=current_user.id, title=payload.title)
+    db.add(thread)
+    db.commit()
+    db.refresh(thread)
+    return thread
+
+
+@app.get("/threads", response_model=list[ThreadResponse])
+def list_threads(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    return (
+        db.query(models.Thread)
+        .filter(models.Thread.user_id == current_user.id)
+        .order_by(models.Thread.updated_at.desc())
+        .all()
+    )
+
+
+@app.delete("/threads/{thread_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_thread(
+    thread_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    thread = _get_thread_or_404(thread_id, current_user, db)
+    db.delete(thread)
+    db.commit()
+
+
+# ---------------------------------------------------------------------------
+# Messages
+# ---------------------------------------------------------------------------
+
+@app.get("/threads/{thread_id}/messages", response_model=list[MessageResponse])
+def list_messages(
+    thread_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    _get_thread_or_404(thread_id, current_user, db)
+    return (
+        db.query(models.Message)
+        .filter(models.Message.thread_id == thread_id)
+        .order_by(models.Message.created_at.asc())
+        .all()
+    )
+
+
+@app.post("/threads/{thread_id}/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+def create_message(
+    thread_id: int,
+    payload: MessageCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    thread = _get_thread_or_404(thread_id, current_user, db)
+    message = models.Message(
+        thread_id=thread_id,
+        role=payload.role,
+        content=payload.content,
+        model=payload.model,
+        message_metadata=payload.message_metadata,
+    )
+    db.add(message)
+    # onupdate only fires when Thread's own columns change; adding a message
+    # doesn't touch the threads row, so we set updated_at explicitly.
+    thread.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(message)
+    return message
