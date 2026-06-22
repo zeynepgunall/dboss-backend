@@ -58,3 +58,8 @@ class MessageResponse(BaseModel):
     model: str | None
     message_metadata: dict[str, Any] | None
     created_at: datetime
+
+
+class ChatRequest(BaseModel):
+    content: str
+    model: str | None = None

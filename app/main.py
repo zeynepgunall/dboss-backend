@@ -8,8 +8,10 @@ from app.schemas import (
     UserCreate, UserResponse, LoginRequest, Token,
     ThreadCreate, ThreadResponse,
     MessageCreate, MessageResponse,
+    ChatRequest,
 )
 from app.auth import hash_password, verify_password, create_access_token, get_current_user
+from app.llm import generate_reply, generate_title, LLMError
 
 # Create tables on startup — for production use Alembic migrations instead
 Base.metadata.create_all(bind=engine)
@@ -153,3 +155,53 @@ def create_message(
     db.commit()
     db.refresh(message)
     return message
+
+
+# ---------------------------------------------------------------------------
+# Chat
+# ---------------------------------------------------------------------------
+
+@app.post("/threads/{thread_id}/chat", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
+def chat(
+    thread_id: int,
+    payload: ChatRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    thread = _get_thread_or_404(thread_id, current_user, db)
+
+    user_msg = models.Message(thread_id=thread_id, role="user", content=payload.content)
+    db.add(user_msg)
+    db.flush()  # assigns ID without committing; visible within this session
+
+    all_msgs = (
+        db.query(models.Message)
+        .filter(models.Message.thread_id == thread_id)
+        .order_by(models.Message.created_at.asc())
+        .all()
+    )
+    history = [{"role": m.role, "content": m.content} for m in all_msgs]
+
+    try:
+        reply = generate_reply(history, payload.model)
+    except LLMError as exc:
+        db.rollback()
+        raise HTTPException(status_code=502, detail=f"LLM error: {exc}")
+
+    assistant_msg = models.Message(
+        thread_id=thread_id,
+        role="assistant",
+        content=reply["content"],
+        model=reply["model"],
+        message_metadata=reply["metadata"],
+    )
+    db.add(assistant_msg)
+
+    if thread.title is None:
+        thread.title = generate_title(history[0]["content"])
+
+    thread.updated_at = datetime.now(timezone.utc)
+
+    db.commit()
+    db.refresh(assistant_msg)
+    return assistant_msg
