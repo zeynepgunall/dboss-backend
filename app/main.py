@@ -1,5 +1,7 @@
+import os
 from datetime import datetime, timezone
 from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from app.database import engine, get_db, Base
@@ -17,6 +19,18 @@ from app.llm import generate_reply, generate_title, LLMError
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="dboss-backend")
+
+_DEFAULT_ORIGINS = ["http://localhost:5173", "http://localhost:3000"]
+_cors_env = os.environ.get("CORS_ORIGINS", "")
+ALLOWED_ORIGINS = [o.strip() for o in _cors_env.split(",") if o.strip()] or _DEFAULT_ORIGINS
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # ---------------------------------------------------------------------------
