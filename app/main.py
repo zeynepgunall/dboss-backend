@@ -13,7 +13,7 @@ from app.schemas import (
     ChatRequest,
 )
 from app.auth import hash_password, verify_password, create_access_token, get_current_user
-from app.llm import generate_reply, generate_title, LLMError
+from app.llm import generate_reply, generate_title, LLMError, ALLOWED_MODELS
 
 # Create tables on startup — for production use Alembic migrations instead
 Base.metadata.create_all(bind=engine)
@@ -70,6 +70,22 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
 @app.get("/me", response_model=UserResponse)
 def me(current_user: models.User = Depends(get_current_user)):
     return current_user
+
+
+# ---------------------------------------------------------------------------
+# Models
+# ---------------------------------------------------------------------------
+
+_MODEL_LABELS = {
+    "openai/gpt-oss-120b": "GPT-OSS 120B (Güçlü)",
+    "openai/gpt-oss-20b": "GPT-OSS 20B (Hızlı)",
+    "qwen/qwen3.6-27b": "Qwen 3.6 27B (Akıllı)",
+}
+
+
+@app.get("/models")
+def list_models():
+    return [{"id": m, "label": _MODEL_LABELS[m]} for m in ALLOWED_MODELS]
 
 
 # ---------------------------------------------------------------------------
