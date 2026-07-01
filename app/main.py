@@ -228,7 +228,9 @@ def chat(
     db.add(assistant_msg)
 
     if thread.title is None:
-        thread.title = generate_title(history[0]["content"])
+        new_title = generate_title(history[0]["content"])
+        if new_title and new_title.strip():
+            thread.title = new_title.strip()
 
     thread.updated_at = datetime.now(timezone.utc)
 

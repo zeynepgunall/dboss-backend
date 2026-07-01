@@ -60,18 +60,48 @@ def generate_reply(history: list[dict], model: str | None = None) -> dict:
     }
 
 
+_TITLE_SYSTEM_PROMPT = (
+    "Sen kısa sohbet başlıkları üreten bir asistansın. "
+    "Sana verilen mesaj için 3-5 kelimelik, tek satırlık kısa bir başlık döndür. "
+    "SADECE başlığı yaz: açıklama yapma, düşünme/akıl yürütme gösterme, "
+    "tırnak işareti veya noktalama ekleme."
+)
+
+
+def _fallback_title(first_message: str) -> str:
+    words = first_message.split()
+    title = " ".join(words[:6]) + ("..." if len(words) > 6 else "")
+    return title.strip() or "Yeni sohbet"
+
+
+def _clean_title(text: str) -> str:
+    text = _strip_thinking(text)
+    # Collapse newlines/extra whitespace to a single line
+    text = " ".join(text.split())
+    # Strip wrapping quotes the model sometimes adds
+    text = text.strip().strip('"').strip("'").strip()
+    return text
+
+
 def generate_title(first_message: str) -> str:
-    prompt = (
-        f"Aşağıdaki mesajdan 3-5 kelimelik kısa bir sohbet başlığı üret. "
-        f"Sadece başlığı yaz, başka hiçbir şey ekleme.\n\nMesaj: {first_message}"
-    )
     try:
         response = _client().chat.completions.create(
             model=_FAST_MODEL,
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=20,
+            messages=[
+                {"role": "system", "content": _TITLE_SYSTEM_PROMPT},
+                {"role": "user", "content": first_message},
+            ],
+            max_tokens=64,
         )
-        return _strip_thinking(response.choices[0].message.content)
-    except (GroqError, LLMError):
-        words = first_message.split()
-        return " ".join(words[:6]) + ("..." if len(words) > 6 else "")
+        raw = response.choices[0].message.content or ""
+        title = _clean_title(raw)
+        used = title if title else _fallback_title(first_message)
+        print(
+            "[generate_title] raw=%r | cleaned=%r | used=%r"
+            % (raw, title, used)
+        )
+        return used
+    except Exception as exc:  # noqa: BLE001 — title must never break the request
+        used = _fallback_title(first_message)
+        print("[generate_title] error=%r | fallback used=%r" % (exc, used))
+        return used
