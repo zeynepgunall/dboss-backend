@@ -1,0 +1,18 @@
+[project]
+name = "dboss-backend"
+version = "0.1.0"
+description = "FastAPI backend for dboss AI chat application"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "bcrypt<4.1",
+    "email-validator>=2.3.0",
+    "fastapi>=0.138.2",
+    "groq>=1.5.0",
+    "passlib[bcrypt]==1.7.4",
+    "psycopg2-binary>=2.9.12",
+    "pydantic-settings>=2.14.2",
+    "python-jose[cryptography]>=3.5.0",
+    "sqlalchemy>=2.0.51",
+    "uvicorn[standard]>=0.49.0",
+]
